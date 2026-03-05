@@ -626,10 +626,10 @@ body {
   <div class="s-star s3"></div><div class="s-star s4"></div>
   <div class="s-star s5"></div><div class="s-star s6"></div>
 
-  <div class="splash-icon-ring">🏫</div>
-  <div class="splash-title">Portal Sekolah</div>
-  <div class="splash-sub">Makan Bergizi Gratis</div>
-  <div class="splash-badge2">Sekolah Penerima</div>
+  <div class="splash-icon-ring" id="splashIconRing">🏫</div>
+  <div class="splash-title" id="splashTitle">Portal Sekolah</div>
+  <div class="splash-sub" id="splashSub">Makan Bergizi Gratis</div>
+  <div class="splash-badge2" id="splashBadge">Sekolah Penerima</div>
 
   <div class="form-card2">
     <h3>🔐 Masuk Akun Sekolah</h3>
@@ -938,7 +938,12 @@ body {
     <div class="settings-card">
       <div class="settings-item" onclick="openKopEditor()">
         <div class="settings-icon" style="background:var(--purple-light)">🏷️</div>
-        <div class="settings-info"><div class="settings-label">Edit Kop / Header</div><div class="settings-desc">Ubah nama, subtitle, logo sekolah</div></div>
+        <div class="settings-info"><div class="settings-label">Edit Kop / Header App</div><div class="settings-desc">Ubah nama, subtitle, logo di dalam app</div></div>
+        <div class="settings-arrow">›</div>
+      </div>
+      <div class="settings-item" onclick="openSplashEditor()">
+        <div class="settings-icon" style="background:linear-gradient(135deg,#7C3AED,#A855F7)">🎨</div>
+        <div class="settings-info"><div class="settings-label">Edit Halaman Login</div><div class="settings-desc">Ubah logo, judul & teks halaman awal</div></div>
         <div class="settings-arrow">›</div>
       </div>
       <div class="settings-item" onclick="openProfileEdit()">
@@ -1393,6 +1398,9 @@ async function loadAllFromDB() {
     }
     renderAll();
     showToast('✅ Data berhasil dimuat!');
+    // Load kop dari localStorage
+    loadKopFromStorage();
+    applyKop();
     // Realtime - update otomatis saat SPPG kirim data baru
     subscribeRealtime('pengiriman', async () => {
       STATE.pengiriman = await dbGetPengiriman();
@@ -1611,9 +1619,9 @@ function renderRecentOrders(){
       <div class="item-foot">
         <div class="item-date">📅 ${fmtDate(p.tanggal)}</div>
         <div class="action-btns">
-          <button class="btn-act btn-view" onclick="viewPesanan(${p.id})">👁</button>
-          <button class="btn-act btn-edit" onclick="editPesanan(${p.id})">✏️</button>
-          <button class="btn-act btn-del" onclick="deletePesanan(${p.id})">🗑</button>
+          <button class="btn-act btn-view" onclick="viewPesanan('${p.id}')">👁</button>
+          <button class="btn-act btn-edit" onclick="editPesanan('${p.id}')">✏️</button>
+          <button class="btn-act btn-del" onclick="deletePesanan('${p.id}')">🗑</button>
         </div>
       </div>
     </div>`;
@@ -1638,9 +1646,9 @@ function renderPesanan(){
       <div class="item-foot">
         <div class="item-date">📅 ${fmtDate(p.tanggal)}</div>
         <div class="action-btns">
-          <button class="btn-act btn-view" onclick="viewPesanan(${p.id})">👁</button>
-          <button class="btn-act btn-edit" onclick="editPesanan(${p.id})">✏️</button>
-          <button class="btn-act btn-del" onclick="deletePesanan(${p.id})">🗑</button>
+          <button class="btn-act btn-view" onclick="viewPesanan('${p.id}')">👁</button>
+          <button class="btn-act btn-edit" onclick="editPesanan('${p.id}')">✏️</button>
+          <button class="btn-act btn-del" onclick="deletePesanan('${p.id}')">🗑</button>
         </div>
       </div>
     </div>`;
@@ -1674,8 +1682,9 @@ function openPesananForm(id=null){
 async function savePesanan(){
   const id=document.getElementById('pesananFormId').value;
   const obj={
-    menuId:+document.getElementById('pMenu').value,
-    kelasId:+document.getElementById('pKelas').value,
+    sekolahId: AUTH.sekolahId,
+    menuId:document.getElementById('pMenu').value,
+    kelasId:document.getElementById('pKelas').value||null,
     jumlah:+document.getElementById('pJumlah').value,
     tanggal:document.getElementById('pTanggal').value,
     sesi:document.getElementById('pSesi').value||'07:00',
@@ -1683,8 +1692,11 @@ async function savePesanan(){
     status:'Menunggu',
   };
   if(!obj.jumlah||!obj.tanggal){showToast('Lengkapi data pesanan','error');return;}
-  if(id){const i=STATE.pesanan.findIndex(p=>p.id==id);STATE.pesanan[i]={...STATE.pesanan[i],...obj};showToast('✅ Pesanan diupdate');}
-  else{STATE.pesanan.push({id:nextId(STATE.pesanan),...obj});showToast('✅ Pesanan berhasil diajukan');}
+  try {
+    if(id){ await dbSavePesanan({id,...obj}); showToast('✅ Pesanan diupdate'); }
+    else { await dbSavePesanan(obj); showToast('✅ Pesanan berhasil diajukan'); }
+    STATE.pesanan = await dbGetPesanan();
+  } catch(e){ showToast('❌ Gagal simpan: '+e.message,'error'); return; }
   closeModal('modalPesananForm');renderAll();
 }
 function viewPesanan(id){
@@ -1706,8 +1718,11 @@ function viewPesanan(id){
 function editPesanan(id){openPesananForm(id);}
 async function deletePesanan(id){
   if(!confirm('Hapus pesanan ini?'))return;
-  STATE.pesanan=STATE.pesanan.filter(p=>p.id!==id);
-  renderAll();showToast('🗑️ Pesanan dihapus');
+  try {
+    await dbDeletePesanan(id);
+    STATE.pesanan=STATE.pesanan.filter(p=>p.id!==id);
+    renderAll();showToast('🗑️ Pesanan dihapus');
+  } catch(e){ showToast('❌ Gagal hapus: '+e.message,'error'); }
 }
 function editFromModal(){}
 function deleteFromModal(){}
@@ -1721,7 +1736,7 @@ function renderMenu(){
   const emojis=['🍱','🥣','🍛','🥪','🍲','🥗'];
   if(!data.length){el.innerHTML='<div class="empty-state" style="grid-column:1/-1"><div class="empty-icon">🍽️</div><div class="empty-text">Tidak ada menu</div></div>';return;}
   el.innerHTML=data.map((m,i)=>`
-    <div class="menu-tile" onclick="viewMenuDetail(${m.id})">
+    <div class="menu-tile" onclick="viewMenuDetail('${m.id}')">
       <div class="menu-emoji">${emojis[i%emojis.length]}</div>
       <div class="menu-tname">${m.nama}</div>
       <div class="menu-tmeta">${m.kategori}</div>
@@ -1766,9 +1781,9 @@ function renderAbsensi(){
       <div class="item-foot">
         <div class="item-date">📅 ${fmtDate(a.tanggal)}</div>
         <div class="action-btns">
-          <button class="btn-act btn-view" onclick="viewAbsensi(${a.id})">👁</button>
-          <button class="btn-act btn-edit" onclick="editAbsensi(${a.id})">✏️</button>
-          <button class="btn-act btn-del" onclick="deleteAbsensi(${a.id})">🗑</button>
+          <button class="btn-act btn-view" onclick="viewAbsensi('${a.id}')">👁</button>
+          <button class="btn-act btn-edit" onclick="editAbsensi('${a.id}')">✏️</button>
+          <button class="btn-act btn-del" onclick="deleteAbsensi('${a.id}')">🗑</button>
         </div>
       </div>
     </div>`;
@@ -1856,7 +1871,7 @@ function renderKelasModal(){
         <div style="font-size:11px;color:var(--muted)">${k.siswa} siswa · ${k.wali}</div>
       </div>
       <div style="display:flex;gap:6px">
-        <button class="btn-act btn-del" onclick="deleteKelas(${k.id})">🗑</button>
+        <button class="btn-act btn-del" onclick="deleteKelas('${k.id}')">🗑</button>
       </div>
     </div>`).join('');
 }
@@ -1866,16 +1881,33 @@ async function saveKelas(){
   const wali=document.getElementById('kelasWali').value;
   const tingkat=+document.getElementById('kelasTingkat').value;
   if(!nama){showToast('Nama kelas wajib diisi','error');return;}
-  STATE.kelas.push({id:nextId(STATE.kelas),nama,tingkat,siswa,wali});
-  renderKelasModal();renderAll();showToast('✅ Kelas ditambahkan');
-  document.getElementById('kelasNama').value='';
-  document.getElementById('kelasSiswa').value='';
-  document.getElementById('kelasWali').value='';
+  // Pastikan sekolahId tersedia - coba berbagai sumber
+  if(!AUTH.sekolahId) {
+    try {
+      const user = await sbGetUser();
+      if(user) {
+        const { data } = await sb.from('users').select('sekolah_id').eq('id', user.id).single();
+        if(data?.sekolah_id) AUTH.sekolahId = data.sekolah_id;
+      }
+    } catch(e) { console.error('Gagal ambil sekolahId:', e); }
+  }
+  if(!AUTH.sekolahId){showToast('❌ ID Sekolah tidak ditemukan. Coba logout dan login ulang.','error');return;}
+  try {
+    await dbSaveKelas({nama,tingkat,siswa,wali}, AUTH.sekolahId);
+    STATE.kelas = await dbGetKelas(AUTH.sekolahId);
+    renderKelasModal();renderAll();showToast('✅ Kelas ' + nama + ' berhasil ditambahkan');
+    document.getElementById('kelasNama').value='';
+    document.getElementById('kelasSiswa').value='';
+    document.getElementById('kelasWali').value='';
+  } catch(e){ showToast('❌ Gagal simpan: '+e.message,'error'); }
 }
 async function deleteKelas(id){
   if(!confirm('Hapus kelas ini?'))return;
-  STATE.kelas=STATE.kelas.filter(k=>k.id!==id);
-  renderKelasModal();renderAll();showToast('🗑️ Kelas dihapus');
+  try {
+    await dbDeleteKelas(id);
+    STATE.kelas=STATE.kelas.filter(k=>k.id!==id);
+    renderKelasModal();renderAll();showToast('🗑️ Kelas dihapus');
+  } catch(e){ showToast('❌ Gagal hapus: '+e.message,'error'); }
 }
 function populateRptKelas(){
   const sel=document.getElementById('rptKelas');
@@ -1914,7 +1946,28 @@ function saveKop(){
     document.getElementById('kopLogoDisplay').textContent=STATE.kop.logoEmoji;
     document.getElementById('kopLogoImg').style.display='none';
   }
+  // Simpan ke localStorage agar tidak hilang saat refresh
+  try { localStorage.setItem('mbg_kop_sek', JSON.stringify(STATE.kop)); } catch(e){}
   closeModal('modalKop');showToast('✅ Kop berhasil diupdate');
+}
+function loadKopFromStorage(){
+  try {
+    const saved = localStorage.getItem('mbg_kop_sek');
+    if(saved){ STATE.kop = {...STATE.kop, ...JSON.parse(saved)}; }
+  } catch(e){}
+}
+function applyKop(){
+  document.getElementById('kopTitle').textContent=STATE.kop.title;
+  document.getElementById('kopSubtitle').textContent=STATE.kop.subtitle;
+  if(STATE.kop.logoImg){
+    document.getElementById('kopLogoDisplay').style.display='none';
+    document.getElementById('kopLogoImg').style.display='block';
+    document.getElementById('kopLogoImg').src=STATE.kop.logoImg;
+  } else {
+    document.getElementById('kopLogoDisplay').style.display='block';
+    document.getElementById('kopLogoDisplay').textContent=STATE.kop.logoEmoji||'🏫';
+    document.getElementById('kopLogoImg').style.display='none';
+  }
 }
 
 // ── PROFIL ──
@@ -2127,9 +2180,9 @@ function renderPengirimanSek() {
 
     let actionBtn = '';
     if(canTerima) {
-      actionBtn = `<button class="btn-act" style="background:var(--green-light);color:var(--green);font-size:11px;padding:7px 12px;font-weight:800;border-radius:10px" onclick="openTerimaSek(${p.id})">✅ Konfirmasi Terima</button>`;
+      actionBtn = `<button class="btn-act" style="background:var(--green-light);color:var(--green);font-size:11px;padding:7px 12px;font-weight:800;border-radius:10px" onclick="openTerimaSek('${p.id}')">✅ Konfirmasi Terima</button>`;
     } else if(canKembali) {
-      actionBtn = `<button class="btn-act" style="background:var(--purple-light);color:var(--purple2);font-size:11px;padding:7px 12px;font-weight:800;border-radius:10px" onclick="openKembaliSek(${p.id})">↩️ Kembalikan Rantang</button>`;
+      actionBtn = `<button class="btn-act" style="background:var(--purple-light);color:var(--purple2);font-size:11px;padding:7px 12px;font-weight:800;border-radius:10px" onclick="openKembaliSek('${p.id}')">↩️ Kembalikan Rantang</button>`;
     }
 
     return `<div class="item-card">
@@ -2161,7 +2214,7 @@ function renderPengirimanSek() {
         ${actionBtn}
         <div style="display:flex;justify-content:space-between;align-items:center">
           <div class="item-date">📅 ${fmtDate(p.tanggal)}</div>
-          <button class="btn-act btn-view" onclick="viewPengirimanSek(${p.id})">👁 Detail</button>
+          <button class="btn-act btn-view" onclick="viewPengirimanSek('${p.id}')">👁 Detail</button>
         </div>
       </div>
     </div>`;
@@ -2254,26 +2307,28 @@ function openKembaliSek(id) {
   openModal('modalKembaliSek');
 }
 async function saveKembaliSek() {
-  const id = +document.getElementById('ksId').value;
+  const id = document.getElementById('ksId').value;
   const jml = +document.getElementById('ksJumlah').value;
   const nama = document.getElementById('ksNama').value;
   if(!jml || !nama) { showToast('Isi nama petugas dan jumlah rantang','error'); return; }
-  const i = STATE.pengiriman.findIndex(p=>p.id===id);
   const kondisi = document.getElementById('ksKondisi').value;
-  STATE.pengiriman[i] = {
-    ...STATE.pengiriman[i],
+  const update = {
     status: 'Rantang Kembali',
-    jumlahKembali: jml,
-    waktuKembali: document.getElementById('ksWaktu').value,
-    kondisiKembali: kondisi,
-    rantangBaik: +document.getElementById('ksRantangBaik').value,
-    rantangRusak: +document.getElementById('ksRantangRusak').value,
-    namaKembali: nama,
-    catatanKembali: document.getElementById('ksCatatan').value,
+    jumlah_kembali: jml,
+    waktu_kembali: document.getElementById('ksWaktu').value,
+    kondisi_kembali: kondisi,
+    rantang_baik: +document.getElementById('ksRantangBaik').value,
+    rantang_rusak: +document.getElementById('ksRantangRusak').value,
+    petugas_sppg: nama,
+    catatan_kembali: document.getElementById('ksCatatan').value,
   };
-  closeModal('modalKembaliSek');
-  renderAll();
-  showToast('↩️ Rantang berhasil dikembalikan ke SPPG!');
+  try {
+    await sb.from('pengiriman').update(update).eq('id', id);
+    STATE.pengiriman = await dbGetPengiriman();
+    closeModal('modalKembaliSek');
+    renderAll();
+    showToast('↩️ Rantang berhasil dikembalikan!');
+  } catch(e) { showToast('❌ Gagal: '+e.message,'error'); }
 }
 
 // Close overlay click
@@ -2285,6 +2340,132 @@ const today=new Date().toISOString().split('T')[0];
 const monthAgo=new Date(Date.now()-30*86400000).toISOString().split('T')[0];
 document.getElementById('rptFrom').value=monthAgo;
 document.getElementById('rptTo').value=today;
+
+// ── SPLASH EDITOR ──
+function getSplashData() {
+  try { return JSON.parse(localStorage.getItem('mbg_splash_sek')||'{}'); } catch(e){ return {}; }
+}
+function saveSplashData(data) {
+  try { localStorage.setItem('mbg_splash_sek', JSON.stringify(data)); } catch(e){}
+}
+function openSplashEditor() {
+  const s = getSplashData();
+  document.getElementById('splashEmojiInput').value = s.emoji || '🏫';
+  document.getElementById('splashTitleInput').value = s.title || 'Portal Sekolah';
+  document.getElementById('splashSubInput').value = s.sub || 'Makan Bergizi Gratis';
+  document.getElementById('splashBadgeInput').value = s.badge || 'Sekolah Penerima';
+  if(s.logoImg) {
+    document.getElementById('splashLogoPreview').style.display='block';
+    document.getElementById('splashLogoPreviewImg').src = s.logoImg;
+  } else {
+    document.getElementById('splashLogoPreview').style.display='none';
+  }
+  openModal('modalSplashEditor');
+}
+function previewSplashLogo(input) {
+  const f = input.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = e => {
+    document.getElementById('splashLogoPreview').style.display='block';
+    document.getElementById('splashLogoPreviewImg').src = e.target.result;
+    const s = getSplashData(); s.logoImg = e.target.result; saveSplashData(s);
+  };
+  r.readAsDataURL(f);
+}
+function saveSplashEditor() {
+  const prev = getSplashData();
+  const data = {
+    emoji: document.getElementById('splashEmojiInput').value || '🏫',
+    title: document.getElementById('splashTitleInput').value || 'Portal Sekolah',
+    sub: document.getElementById('splashSubInput').value || 'Makan Bergizi Gratis',
+    badge: document.getElementById('splashBadgeInput').value || 'Sekolah Penerima',
+    logoImg: prev.logoImg || '',
+  };
+  saveSplashData(data);
+  applySplashData(data);
+  closeModal('modalSplashEditor');
+  showToast('✅ Tampilan halaman login berhasil diupdate!');
+}
+function applySplashData(data) {
+  if(!data || !Object.keys(data).length) return;
+  const titleEl = document.getElementById('splashTitle');
+  const subEl = document.getElementById('splashSub');
+  const badgeEl = document.getElementById('splashBadge');
+  const ringEl = document.getElementById('splashIconRing');
+  if(titleEl) titleEl.textContent = data.title || 'Portal Sekolah';
+  if(subEl) subEl.textContent = data.sub || 'Makan Bergizi Gratis';
+  if(badgeEl) badgeEl.textContent = data.badge || 'Sekolah Penerima';
+  if(ringEl) {
+    if(data.logoImg) {
+      ringEl.innerHTML = `<img src="${data.logoImg}" style="width:70px;height:70px;object-fit:contain;border-radius:16px">`;
+      ringEl.style.background = 'transparent';
+      ringEl.style.border = 'none';
+    } else {
+      ringEl.innerHTML = data.emoji || '🏫';
+      ringEl.style.background = '';
+      ringEl.style.border = '';
+    }
+  }
+}
+
+// ── AUTO SESSION CHECK ──
+async function initApp() {
+  loadKopFromStorage();
+  applySplashData(getSplashData());
+  try {
+    const { data } = await sb.auth.getSession();
+    if (data?.session) {
+      const profile = await sbGetProfile();
+      if (profile?.role === 'sekolah') {
+        AUTH.username = profile.username || data.session.user.email.split('@')[0];
+        AUTH.sekolahId = profile.sekolah_id;
+        document.getElementById('displayUsername').textContent = AUTH.username;
+        document.getElementById('settingsUsernameDesc').textContent = 'NPSN saat ini: ' + AUTH.username;
+        document.getElementById('profileName').textContent = profile.nama || 'Admin Sekolah';
+        document.getElementById('splash').style.display = 'none';
+        document.getElementById('app').style.display = 'block';
+        applyKop();
+        await loadAllFromDB();
+        return;
+      }
+    }
+  } catch(e) { console.error('Session check error:', e); }
+  renderAll();
+}
+initApp();
+
 </script>
+
+<!-- Modal: Edit Splash Screen -->
+<div class="modal-overlay" id="modalSplashEditor">
+  <div class="modal-sheet">
+    <div class="modal-handle"></div>
+    <div class="modal-title">✏️ Edit Tampilan Halaman Awal</div>
+    <div class="field-row">
+      <label>Ikon / Emoji</label>
+      <input id="splashEmojiInput" placeholder="🏫" maxlength="4" style="font-size:24px;text-align:center">
+    </div>
+    <div class="field-row">
+      <label>Upload Logo Sekolah</label>
+      <input type="file" id="splashLogoFile" accept="image/*" onchange="previewSplashLogo(this)" style="font-size:13px">
+      <div id="splashLogoPreview" style="margin-top:8px;display:none">
+        <img id="splashLogoPreviewImg" style="height:60px;border-radius:12px;object-fit:contain">
+      </div>
+    </div>
+    <div class="field-row">
+      <label>Judul Portal</label>
+      <input id="splashTitleInput" placeholder="Portal Sekolah">
+    </div>
+    <div class="field-row">
+      <label>Sub Judul</label>
+      <input id="splashSubInput" placeholder="Makan Bergizi Gratis">
+    </div>
+    <div class="field-row">
+      <label>Badge / Label</label>
+      <input id="splashBadgeInput" placeholder="Sekolah Penerima">
+    </div>
+    <button class="btn-submit2" onclick="saveSplashEditor()">💾 Simpan Tampilan</button>
+  </div>
+</div>
 </body>
 </html>
