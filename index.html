@@ -6,6 +6,7 @@
 <title>MBG — Portal Sekolah</title>
 <link href="https://fonts.googleapis.com/css2?family=Nunito:wght@400;500;600;700;800;900&family=Lexend:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
 
 <!-- Supabase SDK -->
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -163,7 +164,8 @@ async function dbGetAbsensi(sekolahId) {
   return data.map(a => ({ id: a.id, kelasId: a.kelas_id, menuId: a.menu_id, tanggal: a.tanggal, sesi: a.waktu, hadir: a.hadir, tidakHadir: a.tidak_hadir, catatan: a.catatan }));
 }
 async function dbSaveAbsensi(obj, sekolahId) {
-  const row = { sekolah_id: sekolahId, kelas_id: obj.kelasId||null, menu_id: obj.menuId||null, tanggal: obj.tanggal, waktu: obj.sesi||'07:00', hadir: obj.hadir||0, tidak_hadir: obj.tidakHadir||0, catatan: obj.catatan||'' };
+  const sid = sekolahId || obj.sekolahId || AUTH.sekolahId;
+  const row = { sekolah_id: sid, kelas_id: obj.kelasId||null, menu_id: obj.menuId||null, tanggal: obj.tanggal, waktu: obj.sesi||'07:00', hadir: obj.hadir||0, tidak_hadir: obj.tidakHadir||0, catatan: obj.catatan||'' };
   if (obj.id && typeof obj.id === 'string') {
     const { error } = await sb.from('absensi').update(row).eq('id', obj.id);
     if (error) throw error;
@@ -463,6 +465,9 @@ body {
   margin-top:4px;transition:transform .15s;
 }
 .btn-submit2:active { transform:scale(0.98); }
+/* Siswa absensi item hover */
+#siswaAbsensiList div:hover { filter: brightness(0.96); }
+#siswaManagerList div:hover { filter: brightness(0.96); }
 .two-col { display:grid;grid-template-columns:1fr 1fr;gap:10px; }
 
 /* FILTER */
@@ -777,13 +782,24 @@ body {
       </div>
       <button class="btn-sm2" onclick="openAbsensiForm()">+ Absensi</button>
     </div>
-    <div class="filter-bar">
-      <div class="filter-chip active" onclick="filterAbsensi('semua',this)">Semua</div>
-      <div class="filter-chip" onclick="filterAbsensi('penyaluran mbg',this)">Penyaluran MBG</div>
+    <!-- Filter Bar -->
+    <div style="padding:0 18px 8px;display:flex;gap:8px;align-items:center">
+      <!-- Dropdown Kelas -->
+      <div style="position:relative;flex:1">
+        <select id="absensiKelasDropdown" onchange="filterAbsensiKelasDropdown(this.value)"
+          style="width:100%;padding:8px 12px;border-radius:10px;border:1px solid var(--border);font-size:13px;font-family:inherit;background:var(--white);color:var(--text);font-weight:700;appearance:none;cursor:pointer">
+          <option value="semua">📚 Semua Kelas</option>
+        </select>
+      </div>
+      <!-- Filter Tanggal -->
+      <input type="date" id="absensiFrom" onchange="filterAbsensiTanggal()" title="Dari tanggal"
+        style="width:110px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);font-size:12px;font-family:inherit">
+      <input type="date" id="absensiTo" onchange="filterAbsensiTanggal()" title="Sampai tanggal"
+        style="width:110px;padding:8px 10px;border-radius:10px;border:1px solid var(--border);font-size:12px;font-family:inherit">
+      <button onclick="resetFilterAbsensi()" title="Reset filter"
+        style="padding:8px 10px;border-radius:10px;border:none;background:var(--red-light);color:var(--red);font-size:13px;font-weight:700;cursor:pointer">✕</button>
     </div>
-    <div class="search-wrap">
-      <input class="search-inp" type="text" placeholder="Cari kelas..." oninput="searchAbsensi(this.value)">
-    </div>
+    <div id="absensiSummaryBar" style="margin:0 18px 8px;padding:8px 12px;background:var(--purple-light);border-radius:10px;font-size:12px;font-weight:700;color:var(--purple);display:none"></div>
     <div class="list-wrap" id="absensiList"></div>
     <div class="watermark">Developed & Supported by <span>D.D Candra</span></div>
   </div>
@@ -956,6 +972,11 @@ body {
         <div class="settings-info"><div class="settings-label">Kelola Data Kelas</div><div class="settings-desc">Tambah, edit, hapus data kelas</div></div>
         <div class="settings-arrow">›</div>
       </div>
+      <div class="settings-item" onclick="openSiswaManager()">
+        <div class="settings-icon" style="background:#E3F2FD">👨‍🎓</div>
+        <div class="settings-info"><div class="settings-label">Data Siswa Per Kelas</div><div class="settings-desc">Input, upload & download daftar siswa</div></div>
+        <div class="settings-arrow">›</div>
+      </div>
     </div>
 
     <!-- Database -->
@@ -1057,17 +1078,32 @@ body {
     <div class="modal-handle"></div>
     <div class="modal-title" id="absensiFormTitle">Catat Absensi Penyaluran</div>
     <input type="hidden" id="absensiFormId">
-    <div class="field-row"><label>Kelas</label><select id="aKelas"></select></div>
+    <div class="field-row"><label>Kelas</label><select id="aKelas" onchange="loadSiswaAbsensi()"></select></div>
     <div class="two-col">
       <div class="field-row"><label>Tanggal</label><input id="aTanggal" type="date"></div>
       <div class="field-row"><label>Waktu Penyaluran</label><input id="aSesi" type="time" value="07:00"></div>
     </div>
     <div class="field-row"><label>Menu</label><select id="aMenu"></select></div>
     <div class="two-col">
-      <div class="field-row"><label>Hadir (siswa)</label><input id="aHadir" type="number" placeholder="0"></div>
-      <div class="field-row"><label>Tidak Hadir</label><input id="aTidakHadir" type="number" placeholder="0"></div>
+      <div class="field-row"><label>Hadir (siswa)</label><input id="aHadir" type="number" placeholder="0" readonly style="background:var(--green-light);color:var(--green);font-weight:800"></div>
+      <div class="field-row"><label>Tidak Hadir</label><input id="aTidakHadir" type="number" placeholder="0" readonly style="background:var(--red-light);color:var(--red);font-weight:800"></div>
     </div>
-    <div class="field-row"><label>Catatan</label><textarea id="aCatatan" placeholder="Catatan absensi..."></textarea></div>
+    <!-- Daftar Siswa Interaktif -->
+    <div id="siswaAbsensiWrap" style="margin-top:4px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:12px;font-weight:800;color:var(--text)">📋 Daftar Siswa</div>
+        <div style="display:flex;gap:6px">
+          <button onclick="tandaiSemuaHadir()" style="font-size:11px;padding:4px 10px;border-radius:8px;border:none;background:var(--green-light);color:var(--green);font-weight:700;cursor:pointer">✅ Semua Hadir</button>
+          <button onclick="resetAbsensiSiswa()" style="font-size:11px;padding:4px 10px;border-radius:8px;border:none;background:var(--red-light);color:var(--red);font-weight:700;cursor:pointer">🔄 Reset</button>
+        </div>
+      </div>
+      <div id="siswaAbsensiList" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:12px;padding:4px"></div>
+      <div id="siswaAbsensiEmpty" style="display:none;text-align:center;padding:16px;color:var(--muted);font-size:13px">
+        Belum ada data siswa untuk kelas ini.<br>
+        <span style="font-size:11px">Tambah via Settings → Data Siswa</span>
+      </div>
+    </div>
+    <div class="field-row" style="margin-top:8px"><label>Catatan</label><textarea id="aCatatan" placeholder="Catatan absensi..."></textarea></div>
     <button class="btn-submit2" onclick="saveAbsensi()">💾 Simpan Absensi</button>
   </div>
 </div>
@@ -1338,7 +1374,7 @@ const STATE = {
   kop: { title:'SDN Merdeka 01', subtitle:'Peserta Program Makan Bergizi Gratis – SPPG Nusantara Sehat', logoEmoji:'🏫', logoImg:'' },
   pesananFilter:'semua', pesananSearch:'',
   menuFilter:'semua', menuSearch:'',
-  absensiFilter:'semua', absensiSearch:'',
+  absensiFilter:'semua', absensiSearch:'', absensiKelasFilter:'semua', absensiTanggalFrom:'', absensiTanggalTo:'',
   pengirimanFilter:'semua', pengirimanSearch:'',
   currentType:null, currentId:null,
 };
@@ -1352,8 +1388,8 @@ function showToast(msg, type='') {
 }
 function openModal(id){document.getElementById(id).classList.add('open');}
 function closeModal(id){document.getElementById(id).classList.remove('open');}
-function getMenu(id){return STATE.menus.find(m=>m.id===id);}
-function getKelas(id){return STATE.kelas.find(k=>k.id===id);}
+function getMenu(id){return STATE.menus.find(m=>String(m.id)===String(id));}
+function getKelas(id){return STATE.kelas.find(k=>String(k.id)===String(id));}
 function nextId(arr){return arr.length?Math.max(...arr.map(x=>x.id))+1:1;}
 function fmtDate(d){if(!d)return'-';const p=d.split('-');return p[2]+'/'+p[1]+'/'+p[0];}
 function fmtRp(n){return 'Rp '+Number(n).toLocaleString('id-ID');}
@@ -1569,6 +1605,8 @@ function navTo(page){
   document.querySelectorAll('.nav-item')[map[page]]?.classList.add('active');
   if(page==='laporan')renderLaporanPreview();
   if(page==='pengiriman')renderPengirimanSek();
+  // Simpan halaman aktif ke sessionStorage
+  try { sessionStorage.setItem('mbg_sek_page', page); } catch(e){}
 }
 
 // ── RENDER ALL ──
@@ -1759,24 +1797,72 @@ function viewMenuDetail(id){
 }
 
 // ── ABSENSI ──
+function renderAbsensiKelasFilter(){
+  const sel = document.getElementById('absensiKelasDropdown');
+  if(!sel) return;
+  const cur = STATE.absensiKelasFilter || 'semua';
+  sel.innerHTML = '<option value="semua">📚 Semua Kelas</option>' +
+    STATE.kelas.map(k=>`<option value="${k.id}" ${String(k.id)===String(cur)?'selected':''}>${k.nama}</option>`).join('');
+}
+function filterAbsensiKelasDropdown(v){
+  STATE.absensiKelasFilter = v;
+  renderAbsensi();
+}
+function filterAbsensiKelas(v,el){ // kept for compatibility
+  STATE.absensiKelasFilter=v; renderAbsensi();
+}
+function filterAbsensiTanggal(){
+  STATE.absensiTanggalFrom=document.getElementById('absensiFrom').value;
+  STATE.absensiTanggalTo=document.getElementById('absensiTo').value;
+  renderAbsensi();
+}
+function resetFilterAbsensi(){
+  STATE.absensiTanggalFrom='';STATE.absensiTanggalTo='';
+  STATE.absensiKelasFilter='semua';STATE.absensiSearch='';
+  document.getElementById('absensiFrom').value='';
+  document.getElementById('absensiTo').value='';
+  const sel=document.getElementById('absensiKelasDropdown');
+  if(sel) sel.value='semua';
+  renderAbsensi();
+}
 function renderAbsensi(){
+  renderAbsensiKelasFilter();
   const el=document.getElementById('absensiList');
-  let data=STATE.absensi;
-  if(STATE.absensiFilter!=='semua')data=data.filter(a=>(a.sesi||'').toLowerCase().includes(STATE.absensiFilter));
-  if(STATE.absensiSearch)data=data.filter(a=>(getKelas(a.kelasId)?.nama||'').toLowerCase().includes(STATE.absensiSearch.toLowerCase()));
+  let data=[...STATE.absensi];
+  // Filter kelas
+  if(STATE.absensiKelasFilter&&STATE.absensiKelasFilter!=='semua')
+    data=data.filter(a=>String(a.kelasId)===String(STATE.absensiKelasFilter));
+  // Filter tanggal
+  if(STATE.absensiTanggalFrom)
+    data=data.filter(a=>a.tanggal>=STATE.absensiTanggalFrom);
+  if(STATE.absensiTanggalTo)
+    data=data.filter(a=>a.tanggal<=STATE.absensiTanggalTo);
+  // Filter search
+  if(STATE.absensiSearch)
+    data=data.filter(a=>(getKelas(a.kelasId)?.nama||'').toLowerCase().includes(STATE.absensiSearch.toLowerCase())||
+      (getMenu(a.menuId)?.nama||'').toLowerCase().includes(STATE.absensiSearch.toLowerCase()));
+  // Summary bar
+  const sumBar=document.getElementById('absensiSummaryBar');
+  if(data.length&&(STATE.absensiKelasFilter!=='semua'||STATE.absensiTanggalFrom||STATE.absensiTanggalTo)){
+    const totalHadir=data.reduce((s,a)=>s+a.hadir,0);
+    const totalAbsen=data.reduce((s,a)=>s+a.tidakHadir,0);
+    sumBar.style.display='block';
+    sumBar.textContent=`📊 ${data.length} data · ✅ Total Hadir: ${totalHadir} · ❌ Total Absen: ${totalAbsen}`;
+  } else { sumBar.style.display='none'; }
   if(!data.length){el.innerHTML='<div class="empty-state"><div class="empty-icon">📝</div><div class="empty-text">Belum ada absensi</div></div>';return;}
   el.innerHTML=data.map(a=>{
     const k=getKelas(a.kelasId),m=getMenu(a.menuId);
-    const pct=Math.round((a.hadir/(a.hadir+a.tidakHadir))*100)||0;
+    const tot=(a.hadir||0)+(a.tidakHadir||0);
+    const pct=tot>0?Math.round((a.hadir/tot)*100):0;
     return `<div class="item-card">
       <div class="item-top">
-        <div><div class="item-name">${k?.nama||'-'}</div><div class="item-meta">${m?.nama||'-'} · ⏰${a.sesi||'07:00'}</div></div>
+        <div><div class="item-name">${k?.nama||'Kelas ?'}</div><div class="item-meta">${m?.nama||'-'} · ⏰${a.sesi||'07:00'}</div></div>
         <span class="badge ${pct>=90?'badge-green':pct>=70?'badge-orange':'badge-red'}">${pct}% hadir</span>
       </div>
       <hr class="item-divider">
       <div style="display:flex;gap:16px;margin-bottom:8px">
-        <div style="font-size:12px;color:var(--green)">✅ Hadir: <strong>${a.hadir}</strong></div>
-        <div style="font-size:12px;color:var(--red)">❌ Absen: <strong>${a.tidakHadir}</strong></div>
+        <div style="font-size:12px;color:var(--green)">✅ Hadir: <strong>${a.hadir||0}</strong></div>
+        <div style="font-size:12px;color:var(--red)">❌ Absen: <strong>${a.tidakHadir||0}</strong></div>
       </div>
       <div class="item-foot">
         <div class="item-date">📅 ${fmtDate(a.tanggal)}</div>
@@ -1792,12 +1878,15 @@ function renderAbsensi(){
 function filterAbsensi(v,el){STATE.absensiFilter=v;document.querySelectorAll('#page-absensi .filter-chip').forEach(c=>c.classList.remove('active'));el.classList.add('active');renderAbsensi();}
 function searchAbsensi(v){STATE.absensiSearch=v;renderAbsensi();}
 
+// Simpan state absensi siswa per absensi ID untuk edit lanjut
+const absensiEditCache = {};
+
 function openAbsensiForm(id=null){
   const selK=document.getElementById('aKelas');
   selK.innerHTML=STATE.kelas.map(k=>`<option value="${k.id}">${k.nama}</option>`).join('');
   const selM=document.getElementById('aMenu');
   selM.innerHTML=STATE.menus.map(m=>`<option value="${m.id}">${m.nama}</option>`).join('');
-  document.getElementById('absensiFormTitle').textContent=id?'Edit Absensi':'Catat Absensi Penyaluran';
+  document.getElementById('absensiFormTitle').textContent=id?'✏️ Edit Absensi':'Catat Absensi Penyaluran';
   if(id){
     const a=STATE.absensi.find(x=>x.id===id);
     document.getElementById('absensiFormId').value=id;
@@ -1807,28 +1896,113 @@ function openAbsensiForm(id=null){
     document.getElementById('aHadir').value=a.hadir;
     document.getElementById('aTidakHadir').value=a.tidakHadir;
     document.getElementById('aCatatan').value=a.catatan;
+    openModal('modalAbsensiForm');
+    // Load siswa dengan state tersimpan (edit lanjut)
+    setTimeout(() => loadSiswaAbsensiEdit(id, a.kelasId), 100);
   } else {
     document.getElementById('absensiFormId').value='';
-    ['aHadir','aTidakHadir','aCatatan'].forEach(f=>document.getElementById(f).value='');
+    document.getElementById('aHadir').value='0';
+    document.getElementById('aTidakHadir').value='0';
+    document.getElementById('aCatatan').value='';
     document.getElementById('aTanggal').value=new Date().toISOString().split('T')[0];
+    openModal('modalAbsensiForm');
+    setTimeout(() => loadSiswaAbsensi(), 100);
   }
-  openModal('modalAbsensiForm');
+}
+
+// Load siswa untuk MODE EDIT — restore state dari localStorage
+function loadSiswaAbsensiEdit(absensiId, kelasId) {
+  const list = getSiswaKelas(kelasId);
+  const wrap = document.getElementById('siswaAbsensiList');
+  const empty = document.getElementById('siswaAbsensiEmpty');
+  absensiSiswaState = {};
+  if (!list.length) {
+    wrap.innerHTML=''; wrap.style.display='none'; empty.style.display='block';
+    updateAbsensiCount(); return;
+  }
+  // Prioritas 1: Cache in-memory (edit dalam sesi yg sama)
+  if(absensiEditCache[absensiId]) {
+    absensiSiswaState = {...absensiEditCache[absensiId]};
+  } else {
+    // Prioritas 2: Restore dari localStorage (tersimpan saat simpan sebelumnya)
+    try {
+      const saved = localStorage.getItem(`mbg_abs_state_${absensiId}`);
+      if(saved) {
+        const savedList = JSON.parse(saved);
+        // Cocokkan nama siswa dengan index di list saat ini
+        list.forEach((s, i) => {
+          const match = savedList.find(x => x.nama === s.nama);
+          if(match !== undefined) {
+            absensiSiswaState[i] = match.hadir === true ? true : false;
+          } else {
+            absensiSiswaState[i] = false; // default tidak hadir jika tidak ada di list lama
+          }
+        });
+      } else {
+        // Prioritas 3: Estimasi dari jumlah hadir/tidak hadir
+        const absensi = STATE.absensi.find(a=>String(a.id)===String(absensiId));
+        const hadirCount = absensi?.hadir || 0;
+        const tidakCount = absensi?.tidakHadir || 0;
+        if(hadirCount + tidakCount === list.length) {
+          // Jumlah cocok: tandai N siswa pertama hadir, sisanya tidak hadir
+          list.forEach((_, i) => {
+            absensiSiswaState[i] = i < hadirCount ? true : false;
+          });
+        } else {
+          // Jumlah tidak cocok: semua hadir dulu, biar admin yang update
+          list.forEach((_, i) => { absensiSiswaState[i] = true; });
+        }
+      }
+    } catch(e) {
+      list.forEach((_, i) => { absensiSiswaState[i] = true; });
+    }
+  }
+  empty.style.display='none'; wrap.style.display='block';
+  renderSiswaAbsensi(list);
+  updateAbsensiCount();
 }
 async function saveAbsensi(){
   const id=document.getElementById('absensiFormId').value;
+  const kelasId = document.getElementById('aKelas').value;
+  const siswaDaftarCount = getSiswaKelas(kelasId).length;
+  // Siswa yang belum diklik (null) → otomatis TIDAK HADIR saat simpan
+  if(siswaDaftarCount > 0) {
+    Object.keys(absensiSiswaState).forEach(k => {
+      if(absensiSiswaState[k] === null) absensiSiswaState[k] = false;
+    });
+    renderSiswaAbsensi(getSiswaKelas(kelasId));
+    updateAbsensiCount();
+  }
   const obj={
-    kelasId:+document.getElementById('aKelas').value,
-    menuId:+document.getElementById('aMenu').value,
-    tanggal:document.getElementById('aTanggal').value,
-    sesi:document.getElementById('aSesi').value||'07:00',
-    hadir:+document.getElementById('aHadir').value,
-    tidakHadir:+document.getElementById('aTidakHadir').value,
-    catatan:document.getElementById('aCatatan').value,
+    sekolahId: AUTH.sekolahId,
+    kelasId: kelasId,
+    menuId: document.getElementById('aMenu').value,
+    tanggal: document.getElementById('aTanggal').value,
+    sesi: document.getElementById('aSesi').value||'07:00',
+    hadir: +document.getElementById('aHadir').value,
+    tidakHadir: +document.getElementById('aTidakHadir').value,
+    catatan: document.getElementById('aCatatan').value,
   };
   if(!obj.tanggal){showToast('Tanggal wajib diisi','error');return;}
-  if(id){const i=STATE.absensi.findIndex(a=>a.id==id);STATE.absensi[i]={...STATE.absensi[i],...obj};showToast('✅ Absensi diupdate');}
-  else{STATE.absensi.push({id:nextId(STATE.absensi),...obj});showToast('✅ Absensi disimpan');}
-  closeModal('modalAbsensiForm');renderAll();
+  try {
+    let savedId = id;
+    if(id){ await dbSaveAbsensi({id,...obj}); showToast('✅ Absensi diupdate'); }
+    else { savedId = await dbSaveAbsensi(obj); showToast('✅ Absensi disimpan'); }
+    // Simpan state siswa per absensi agar bisa di-restore saat edit
+    const storeId = savedId || id;
+    if(storeId && siswaDaftarCount > 0) {
+      try {
+        const siswaList = getSiswaKelas(kelasId);
+        const stateToSave = siswaList.map((s,i) => ({
+          nama: s.nama,
+          hadir: absensiSiswaState[i] === true
+        }));
+        localStorage.setItem(`mbg_abs_state_${storeId}`, JSON.stringify(stateToSave));
+      } catch(e){}
+    }
+    STATE.absensi = await dbGetAbsensi(AUTH.sekolahId);
+  } catch(e){ showToast('❌ Gagal simpan: '+e.message,'error'); return; }
+  closeModal('modalAbsensiForm'); renderAll();
 }
 function viewAbsensi(id){
   const a=STATE.absensi.find(x=>x.id===id);
@@ -2426,6 +2600,11 @@ async function initApp() {
         document.getElementById('app').style.display = 'block';
         applyKop();
         await loadAllFromDB();
+        // Restore halaman terakhir sebelum refresh
+        try {
+          const lastPage = sessionStorage.getItem('mbg_sek_page');
+          if(lastPage && lastPage !== 'dashboard') setTimeout(()=>navTo(lastPage), 50);
+        } catch(e){}
         return;
       }
     }
@@ -2467,5 +2646,319 @@ initApp();
     <button class="btn-submit2" onclick="saveSplashEditor()">💾 Simpan Tampilan</button>
   </div>
 </div>
+
+<!-- Modal: Data Siswa Per Kelas -->
+<div class="modal-overlay" id="modalSiswaManager">
+  <div class="modal-sheet" style="max-height:92vh">
+    <div class="modal-handle"></div>
+
+    <!-- Header dengan tombol Kembali -->
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+      <button onclick="closeModal('modalSiswaManager')" style="width:34px;height:34px;border-radius:10px;border:none;background:var(--bg);color:var(--text);font-size:18px;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0">‹</button>
+      <div style="font-size:16px;font-weight:800;color:var(--text)">👨‍🎓 Data Siswa Per Kelas</div>
+    </div>
+
+    <!-- Pilih Kelas -->
+    <div class="field-row">
+      <label>Pilih Kelas</label>
+      <select id="siswaKelasSelect" onchange="loadSiswaManager()"></select>
+    </div>
+
+    <!-- Tombol Download & Upload (satu file semua kelas) -->
+    <div style="background:var(--purple-light);border-radius:12px;padding:10px 12px;margin-bottom:10px;border:1px solid var(--purple-mid)">
+      <div style="font-size:11px;font-weight:800;color:var(--purple);margin-bottom:8px">📁 SEMUA KELAS SEKALIGUS</div>
+      <div style="display:flex;gap:8px">
+        <button onclick="downloadTemplateSemuaKelas()" style="flex:1;padding:9px;border-radius:10px;border:none;background:var(--purple);color:#fff;font-weight:800;font-size:12px;cursor:pointer">📥 Download Semua Kelas</button>
+        <label style="flex:1;padding:9px;border-radius:10px;background:#fff;color:var(--purple);font-weight:800;font-size:12px;cursor:pointer;text-align:center;border:1.5px solid var(--purple)">
+          📤 Upload Semua Kelas
+          <input type="file" id="siswaUploadSemuaFile" accept=".xlsx,.xls" onchange="uploadSemuaKelas(this)" style="display:none">
+        </label>
+      </div>
+      <div style="font-size:10px;color:var(--muted);margin-top:6px">1 file Excel berisi sheet per kelas (7A, 7B, 8A, dst)</div>
+    </div>
+
+    <!-- Tombol Download/Upload per kelas -->
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <button onclick="downloadTemplateSiswa()" style="flex:1;padding:9px;border-radius:10px;border:none;background:var(--green-light);color:var(--green);font-weight:800;font-size:11px;cursor:pointer">📥 Download Kelas Ini</button>
+      <label style="flex:1;padding:9px;border-radius:10px;background:#E3F2FD;color:#1565C0;font-weight:800;font-size:11px;cursor:pointer;text-align:center">
+        📤 Upload Kelas Ini
+        <input type="file" id="siswaUploadFile" accept=".xlsx,.xls,.csv" onchange="uploadTemplateSiswa(this)" style="display:none">
+      </label>
+    </div>
+
+    <!-- Input Manual -->
+    <div style="display:flex;gap:8px;margin-bottom:10px">
+      <input id="siswaNamaInput" placeholder="Nama siswa..." style="flex:1;padding:10px;border-radius:10px;border:1px solid var(--border);font-size:13px;font-family:inherit" onkeydown="if(event.key==='Enter')tambahSiswaManual()">
+      <button onclick="tambahSiswaManual()" style="padding:10px 16px;border-radius:10px;border:none;background:var(--purple);color:#fff;font-weight:800;font-size:13px;cursor:pointer">+ Tambah</button>
+    </div>
+
+    <!-- Counter -->
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <div style="font-size:12px;font-weight:800;color:var(--muted)" id="siswaCountLabel">0 siswa terdaftar</div>
+      <button onclick="hapusSemuaSiswa()" style="font-size:11px;padding:4px 10px;border-radius:8px;border:none;background:var(--red-light);color:var(--red);font-weight:700;cursor:pointer">🗑️ Hapus Semua</button>
+    </div>
+
+    <!-- Daftar Siswa -->
+    <div id="siswaManagerList" style="max-height:240px;overflow-y:auto;border:1px solid var(--border);border-radius:12px;padding:4px"></div>
+    <div id="siswaManagerEmpty" style="display:none;text-align:center;padding:20px;color:var(--muted);font-size:13px">
+      Belum ada siswa.<br>Tambah manual atau upload Excel.
+    </div>
+  </div>
+</div>
+
+<script>
+// ══════════════════════════════════════════════════════
+// SISTEM DATA SISWA — localStorage per kelas
+// ══════════════════════════════════════════════════════
+
+function getSiswaKey(kelasId) { return `mbg_siswa_${AUTH.sekolahId||'lokal'}_${kelasId}`; }
+
+function getSiswaKelas(kelasId) {
+  try { return JSON.parse(localStorage.getItem(getSiswaKey(kelasId)) || '[]'); } catch(e) { return []; }
+}
+function saveSiswaKelas(kelasId, list) {
+  try { localStorage.setItem(getSiswaKey(kelasId), JSON.stringify(list)); } catch(e) {}
+}
+
+// ── SISWA MANAGER (Settings) ──
+function openSiswaManager() {
+  const sel = document.getElementById('siswaKelasSelect');
+  sel.innerHTML = STATE.kelas.map(k => `<option value="${k.id}">${k.nama}</option>`).join('');
+  loadSiswaManager();
+  openModal('modalSiswaManager');
+}
+
+function loadSiswaManager() {
+  const kelasId = document.getElementById('siswaKelasSelect').value;
+  const list = getSiswaKelas(kelasId);
+  const el = document.getElementById('siswaManagerList');
+  const empty = document.getElementById('siswaManagerEmpty');
+  document.getElementById('siswaCountLabel').textContent = `${list.length} siswa terdaftar`;
+  if (!list.length) { el.innerHTML=''; el.style.display='none'; empty.style.display='block'; return; }
+  empty.style.display='none'; el.style.display='block';
+  el.innerHTML = list.map((s,i) => `
+    <div style="display:flex;align-items:center;padding:8px 10px;border-bottom:1px solid var(--border);gap:8px">
+      <div style="width:24px;height:24px;border-radius:50%;background:var(--purple-light);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;color:var(--purple);flex-shrink:0">${i+1}</div>
+      <div style="flex:1;font-size:13px;font-weight:600">${s.nama}</div>
+      <button onclick="hapusSiswa('${kelasId}',${i})" style="border:none;background:var(--red-light);color:var(--red);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer">✕</button>
+    </div>`).join('');
+}
+
+function tambahSiswaManual() {
+  const input = document.getElementById('siswaNamaInput');
+  const nama = input.value.trim();
+  if (!nama) { showToast('Isi nama siswa dulu','error'); return; }
+  const kelasId = document.getElementById('siswaKelasSelect').value;
+  const list = getSiswaKelas(kelasId);
+  list.push({ nama, hadir: null });
+  saveSiswaKelas(kelasId, list);
+  input.value = '';
+  loadSiswaManager();
+  showToast('✅ Siswa ditambahkan');
+}
+
+function hapusSiswa(kelasId, idx) {
+  const list = getSiswaKelas(kelasId);
+  list.splice(idx, 1);
+  saveSiswaKelas(kelasId, list);
+  loadSiswaManager();
+}
+
+function hapusSemuaSiswa() {
+  if (!confirm('Hapus semua data siswa kelas ini?')) return;
+  const kelasId = document.getElementById('siswaKelasSelect').value;
+  saveSiswaKelas(kelasId, []);
+  loadSiswaManager();
+  showToast('🗑️ Data siswa dihapus');
+}
+
+// ── DOWNLOAD TEMPLATE EXCEL ──
+// ── DOWNLOAD TEMPLATE SATU KELAS ──
+function downloadTemplateSiswa() {
+  const kelasId = document.getElementById('siswaKelasSelect').value;
+  const kelas = STATE.kelas.find(k => k.id == kelasId);
+  const namaKelas = kelas?.nama || 'Kelas';
+  const existing = getSiswaKelas(kelasId);
+  const header = [['No', 'Nama Siswa', 'Keterangan']];
+  const rows = existing.length > 0
+    ? existing.map((s, i) => [i+1, s.nama, ''])
+    : Array.from({length: 10}, (_, i) => [i+1, '', '']);
+  const ws = XLSX.utils.aoa_to_sheet([...header, ...rows]);
+  ws['!cols'] = [{ wch: 5 }, { wch: 32 }, { wch: 20 }];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, namaKelas.replace(/[:\\/?*\[\]]/g,''));
+  XLSX.writeFile(wb, `Siswa_${namaKelas.replace(/\s/g,'_')}.xlsx`);
+  showToast('📥 Template kelas ini didownload');
+}
+
+// ── DOWNLOAD TEMPLATE SEMUA KELAS (multi-sheet) ──
+function downloadTemplateSemuaKelas() {
+  if (!STATE.kelas.length) { showToast('❌ Belum ada data kelas','error'); return; }
+  const wb = XLSX.utils.book_new();
+  STATE.kelas.forEach(k => {
+    const existing = getSiswaKelas(k.id);
+    const header = [['No', 'Nama Siswa', 'Keterangan']];
+    const rows = existing.length > 0
+      ? existing.map((s, i) => [i+1, s.nama, ''])
+      : Array.from({length: k.siswa || 10}, (_, i) => [i+1, '', '']);
+    const ws = XLSX.utils.aoa_to_sheet([...header, ...rows]);
+    ws['!cols'] = [{ wch: 5 }, { wch: 32 }, { wch: 20 }];
+    // Nama sheet max 31 karakter, hapus karakter tidak valid
+    const sheetName = k.nama.replace(/[:\\/?*\[\]]/g,'').substring(0, 31);
+    XLSX.utils.book_append_sheet(wb, ws, sheetName);
+  });
+  XLSX.writeFile(wb, `Template_Siswa_Semua_Kelas.xlsx`);
+  showToast(`📥 Template ${STATE.kelas.length} kelas didownload`);
+}
+
+// ── UPLOAD EXCEL SATU KELAS ──
+function uploadTemplateSiswa(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const kelasId = document.getElementById('siswaKelasSelect').value;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+      const siswaList = rows.slice(1)
+        .filter(r => r[1] && String(r[1]).trim())
+        .map(r => ({ nama: String(r[1]).trim(), hadir: null }));
+      if (!siswaList.length) { showToast('❌ Tidak ada data siswa ditemukan','error'); return; }
+      saveSiswaKelas(kelasId, siswaList);
+      loadSiswaManager();
+      showToast(`✅ ${siswaList.length} siswa berhasil diimport`);
+    } catch(err) { showToast('❌ Gagal baca file: '+err.message,'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+  input.value = '';
+}
+
+// ── UPLOAD EXCEL SEMUA KELAS (multi-sheet) ──
+function uploadSemuaKelas(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(e) {
+    try {
+      const wb = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
+      let totalImport = 0;
+      let kelasImport = 0;
+      wb.SheetNames.forEach(sheetName => {
+        // Cari kelas yang cocok berdasarkan nama sheet
+        const kelas = STATE.kelas.find(k =>
+          k.nama.toLowerCase().replace(/\s/g,'') === sheetName.toLowerCase().replace(/\s/g,'') ||
+          k.nama.toLowerCase() === sheetName.toLowerCase()
+        );
+        if (!kelas) {
+          console.warn(`Sheet "${sheetName}" tidak cocok dengan kelas manapun, dilewati`);
+          return;
+        }
+        const ws = wb.Sheets[sheetName];
+        const rows = XLSX.utils.sheet_to_json(ws, { header: 1 });
+        const siswaList = rows.slice(1)
+          .filter(r => r[1] && String(r[1]).trim())
+          .map(r => ({ nama: String(r[1]).trim(), hadir: null }));
+        if (siswaList.length) {
+          saveSiswaKelas(kelas.id, siswaList);
+          totalImport += siswaList.length;
+          kelasImport++;
+        }
+      });
+      if (!totalImport) {
+        showToast('❌ Tidak ada data yang cocok. Pastikan nama sheet = nama kelas (7A, 7B, dst)','error');
+        return;
+      }
+      loadSiswaManager();
+      showToast(`✅ ${totalImport} siswa dari ${kelasImport} kelas berhasil diimport`);
+    } catch(err) { showToast('❌ Gagal baca file: '+err.message,'error'); }
+  };
+  reader.readAsArrayBuffer(file);
+  input.value = '';
+}
+
+// ══════════════════════════════════════════════════════
+// ABSENSI INTERAKTIF — daftar siswa dengan klik
+// ══════════════════════════════════════════════════════
+
+// State absensi siswa saat ini
+let absensiSiswaState = {}; // { namaIdx: true/false/null }
+
+function loadSiswaAbsensi() {
+  const kelasId = document.getElementById('aKelas').value;
+  const list = getSiswaKelas(kelasId);
+  const wrap = document.getElementById('siswaAbsensiList');
+  const empty = document.getElementById('siswaAbsensiEmpty');
+
+  // Reset state
+  absensiSiswaState = {};
+  list.forEach((s, i) => { absensiSiswaState[i] = null; });
+
+  if (!list.length) {
+    wrap.innerHTML = '';
+    wrap.style.display = 'none';
+    empty.style.display = 'block';
+    updateAbsensiCount();
+    return;
+  }
+
+  empty.style.display = 'none';
+  wrap.style.display = 'block';
+  renderSiswaAbsensi(list);
+  updateAbsensiCount();
+}
+
+function renderSiswaAbsensi(list) {
+  const wrap = document.getElementById('siswaAbsensiList');
+  wrap.innerHTML = list.map((s, i) => {
+    const status = absensiSiswaState[i];
+    const bg = status === true ? 'var(--green-light)' : status === false ? 'var(--red-light)' : 'var(--bg)';
+    const icon = status === true ? '✅' : status === false ? '❌' : '⬜';
+    const textColor = status === true ? 'var(--green)' : status === false ? 'var(--red)' : 'var(--text)';
+    return `<div onclick="toggleSiswaAbsensi(${i})" style="display:flex;align-items:center;padding:9px 12px;border-bottom:1px solid var(--border);cursor:pointer;background:${bg};transition:background 0.15s;gap:10px">
+      <div style="font-size:18px;width:24px;text-align:center">${icon}</div>
+      <div style="flex:1;font-size:13px;font-weight:600;color:${textColor}">${s.nama}</div>
+      <div style="font-size:11px;color:${textColor};font-weight:700">${status === true ? 'HADIR' : status === false ? 'TIDAK HADIR' : 'Belum dicatat'}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleSiswaAbsensi(idx) {
+  const kelasId = document.getElementById('aKelas').value;
+  const list = getSiswaKelas(kelasId);
+  // Toggle: null/belum → hadir, hadir → tidak hadir, tidak hadir → hadir
+  const cur = absensiSiswaState[idx];
+  absensiSiswaState[idx] = (cur === true) ? false : true;
+  renderSiswaAbsensi(list);
+  updateAbsensiCount();
+  // Simpan ke cache untuk edit lanjut
+  const editId = document.getElementById('absensiFormId').value;
+  if(editId) absensiEditCache[editId] = {...absensiSiswaState};
+}
+
+function updateAbsensiCount() {
+  const hadir = Object.values(absensiSiswaState).filter(v => v === true).length;
+  const tidakHadir = Object.values(absensiSiswaState).filter(v => v === false).length;
+  document.getElementById('aHadir').value = hadir;
+  document.getElementById('aTidakHadir').value = tidakHadir;
+}
+
+function tandaiSemuaHadir() {
+  const kelasId = document.getElementById('aKelas').value;
+  const list = getSiswaKelas(kelasId);
+  list.forEach((_, i) => { absensiSiswaState[i] = true; });
+  renderSiswaAbsensi(list);
+  updateAbsensiCount();
+}
+
+function resetAbsensiSiswa() {
+  const kelasId = document.getElementById('aKelas').value;
+  const list = getSiswaKelas(kelasId);
+  list.forEach((_, i) => { absensiSiswaState[i] = null; });
+  renderSiswaAbsensi(list);
+  updateAbsensiCount();
+}
+</script>
 </body>
 </html>
